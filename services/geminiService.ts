@@ -1,14 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import type { GeminiResponse } from '../types';
 
-const API_KEY = process.env.API_KEY;
-
-if (!API_KEY) {
-  throw new Error("API_KEY do Google Gemini não encontrada. Verifique as variáveis de ambiente.");
-}
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
-
 const schema = {
     type: Type.OBJECT,
     properties: {
@@ -43,6 +35,23 @@ const schema = {
 };
 
 export const analyzeStatement = async (base64Image: string, mimeType: string): Promise<GeminiResponse> => {
+  // Acessamos a chave de forma segura para evitar "ReferenceError" se process não existir no navegador
+  let apiKey = '';
+  try {
+    // @ts-ignore
+    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+      apiKey = process.env.API_KEY;
+    }
+  } catch (e) {
+    // Ignora erro se process não estiver definido
+  }
+
+  if (!apiKey) {
+    throw new Error("Chave de API não encontrada. Configure a variável de ambiente API_KEY no painel da Vercel e faça um Redeploy.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey: apiKey });
+
   const prompt = `
     Você é um assistente financeiro especialista em análise de extratos bancários brasileiros.
     Analise o documento do extrato bancário fornecido (pode ser uma imagem ou PDF).
@@ -57,7 +66,7 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
     2. Ignore especificamente transações de crédito que sejam resgates de aplicações financeiras (por exemplo, com descrições como "RESGATE APLICACAO", "RESGATE CDB", ou "resgates de aplicações financeira RBD"). Essas não são novas receitas e não devem ser incluídas na lista de 'positiveEntries'.
     3. Ignore transações de crédito que sejam transferências da mesma titularidade (do próprio cliente para ele mesmo). Uma vez que você identificou o nome do cliente ('clientName'), ignore quaisquer transações PIX ou TED recebidas onde o remetente é o próprio titular da conta. Descrições comuns para isso incluem 'TRANSF MESMA TITULARIDADE', 'TED C', ou quando o nome do remetente na descrição da transação é o mesmo que 'clientName'. Essas não representam nova receita.
     
-    Apenas se concentre nos valores de CRÉITO que representam receita real de TERCEIROS.
+    Apenas se concentre nos valores de CRÉDITO que representam receita real de TERCEIROS.
     Retorne os dados estritamente no formato JSON solicitado, contendo o 'clientName' e uma lista de 'positiveEntries'.
     Se não houver transações de crédito válidas, retorne uma lista vazia para 'positiveEntries', mas ainda tente fornecer o 'clientName'. Se o nome do cliente não puder ser encontrado, retorne uma string vazia para 'clientName'.
   `;
@@ -93,9 +102,9 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
     return parsedJson;
   } catch (error: any) {
     console.error("Erro na API Gemini:", error);
-    if (error.message.includes("SAFETY")) {
+    if (error.message && error.message.includes("SAFETY")) {
          throw new Error("A análise foi bloqueada por políticas de segurança. Tente uma imagem diferente.");
     }
-    throw new Error("Não foi possível analisar o extrato. A IA pode não ter conseguido extrair os dados ou ocorreu um erro de conexão.");
+    throw new Error(error.message || "Não foi possível analisar o extrato.");
   }
 };

@@ -6,9 +6,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Analisador de Extrato Bancário com IA</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Polyfill para evitar erro 'process is not defined' (Tela Branca) -->
+    <!-- Polyfill Robusto para Vercel/Vite -->
     <script>
-      window.process = window.process || { env: {} };
+      // Garante que window.process existe
+      window.process = window.process || {};
+      window.process.env = window.process.env || {};
+      
+      // Tenta capturar variáveis injetadas pelo Vite (se disponível)
+      try {
+        if (import.meta && import.meta.env) {
+           // Mapeia VITE_API_KEY para process.env.API_KEY se existir
+           if (import.meta.env.VITE_API_KEY) {
+             window.process.env.API_KEY = import.meta.env.VITE_API_KEY;
+           }
+           // Mapeia API_KEY direta se existir (depende da config do build)
+           if (import.meta.env.API_KEY) {
+             window.process.env.API_KEY = import.meta.env.API_KEY;
+           }
+        }
+      } catch (e) {
+        console.log('Polyfill env: import.meta não disponível');
+      }
     </script>
   <script type="importmap">
 {

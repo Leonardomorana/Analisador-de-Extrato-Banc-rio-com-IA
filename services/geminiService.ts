@@ -41,13 +41,17 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
     // @ts-ignore
     if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
       apiKey = process.env.API_KEY;
+    } else if (typeof window !== 'undefined' && (window as any).process && (window as any).process.env && (window as any).process.env.API_KEY) {
+        // Fallback explícito para window.process
+        apiKey = (window as any).process.env.API_KEY;
     }
   } catch (e) {
-    console.warn("Não foi possível acessar process.env", e);
+    console.warn("Aviso: Não foi possível acessar as variáveis de ambiente.", e);
   }
 
   if (!apiKey) {
-    throw new Error("Chave de API não identificada. Verifique se a variável 'API_KEY' foi adicionada corretamente nas configurações do Vercel e se você realizou um novo Deploy.");
+    console.error("ERRO CRÍTICO: API_KEY não encontrada em process.env");
+    throw new Error("Chave de API não configurada. No Vercel, certifique-se de adicionar a variável 'API_KEY' (ou 'VITE_API_KEY') nas configurações do projeto e fazer um REDEPLOY.");
   }
 
   const ai = new GoogleGenAI({ apiKey: apiKey });

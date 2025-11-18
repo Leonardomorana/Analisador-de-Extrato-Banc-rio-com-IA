@@ -35,7 +35,7 @@ const schema = {
 };
 
 export const analyzeStatement = async (base64Image: string, mimeType: string): Promise<GeminiResponse> => {
-  // Acessamos a chave de forma segura para evitar "ReferenceError" se process não existir no navegador
+  // Acessamos a chave de forma segura para evitar erros em tempo de execução
   let apiKey = '';
   try {
     // @ts-ignore
@@ -43,11 +43,11 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
       apiKey = process.env.API_KEY;
     }
   } catch (e) {
-    // Ignora erro se process não estiver definido
+    console.warn("Não foi possível acessar process.env", e);
   }
 
   if (!apiKey) {
-    throw new Error("Chave de API não encontrada. Configure a variável de ambiente API_KEY no painel da Vercel e faça um Redeploy.");
+    throw new Error("Chave de API não identificada. Verifique se a variável 'API_KEY' foi adicionada corretamente nas configurações do Vercel e se você realizou um novo Deploy.");
   }
 
   const ai = new GoogleGenAI({ apiKey: apiKey });

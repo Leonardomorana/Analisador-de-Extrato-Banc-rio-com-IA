@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
   <head>
@@ -7,6 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Analisador de Extrato Bancário com IA</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Polyfill para evitar erro 'process is not defined' (Tela Branca) -->
+    <script>
+      window.process = window.process || { env: {} };
+    </script>
   <script type="importmap">
 {
   "imports": {

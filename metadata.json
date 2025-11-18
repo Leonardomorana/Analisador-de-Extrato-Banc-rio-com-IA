@@ -1,0 +1,5 @@
+{
+  "name": "Analisador de Extrato Bancário com IA",
+  "description": "Um agente de IA que lê imagens de extratos bancários, identifica e tabula todas as transações de crédito (valores positivos) usando a API Gemini.",
+  "requestFramePermissions": []
+}

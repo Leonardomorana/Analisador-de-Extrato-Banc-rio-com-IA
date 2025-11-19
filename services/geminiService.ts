@@ -36,56 +36,45 @@ const schema = {
 
 export const analyzeStatement = async (base64Image: string, mimeType: string): Promise<GeminiResponse> => {
   
-  // Tenta recuperar a chave de API de todas as formas possíveis suportadas pelo Vite e Vercel.
-  // IMPORTANTE: O acesso DEVE ser explícito (ponto notation) para que o Vite faça o replace no build.
-  let apiKey = '';
+  // Tenta recuperar a chave de API.
+  // Prioridade: 1. import.meta.env.VITE_API_KEY (Padrão Vite)
+  //             2. process.env.VITE_API_KEY (Fallback Vercel)
+  //             3. process.env.API_KEY (Fallback genérico)
+  
+  let rawApiKey = '';
 
-  try {
-      // 1. Padrão Vite (Obrigatório uso de VITE_ no prefixo para exposição no client-side)
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
       // @ts-ignore
-      if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
-          // @ts-ignore
-          apiKey = import.meta.env.VITE_API_KEY;
-      }
-      // 2. Fallback para API_KEY direta (caso alguma config específica de define no vite.config exponha isso)
-      // @ts-ignore
-      else if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.API_KEY) {
-          // @ts-ignore
-          apiKey = import.meta.env.API_KEY;
-      }
-      // 3. Fallback para process.env (Node ou compatibilidade)
-      // @ts-ignore
-      else if (typeof process !== 'undefined' && process.env && process.env.VITE_API_KEY) {
-          // @ts-ignore
-          apiKey = process.env.VITE_API_KEY;
-      }
-      // @ts-ignore
-      else if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-          // @ts-ignore
-          apiKey = process.env.API_KEY;
-      }
-  } catch (err) {
-      console.error("Erro ao ler variáveis de ambiente:", err);
+      rawApiKey = import.meta.env.VITE_API_KEY;
+  } 
+  // @ts-ignore
+  else if (typeof process !== 'undefined' && process.env) {
+       // @ts-ignore
+       rawApiKey = process.env.VITE_API_KEY || process.env.API_KEY || '';
   }
 
-  // Log para depuração no console do navegador (F12)
-  if (!apiKey) {
-      console.warn("GeminiService: Nenhuma API Key encontrada nas variáveis de ambiente.");
-      console.log("Verificando import.meta.env:", (import.meta as any)?.env);
-  } else {
-      console.log("GeminiService: API Key carregada com sucesso (inicia com " + apiKey.substring(0, 4) + "...)");
-  }
+  // Limpeza da chave: remove espaços em branco e aspas acidentais que podem ocorrer ao copiar/colar no Vercel
+  const apiKey = rawApiKey ? rawApiKey.trim().replace(/^["']|["']$/g, '') : '';
+
+  console.log("Status da API Key:", apiKey ? "Presente" : "Ausente", apiKey ? `(Começa com: ${apiKey.substring(0, 4)}...)` : "");
 
   if (!apiKey) {
     throw new Error(
         "CHAVE DE API NÃO ENCONTRADA.\n\n" +
-        "Instruções para corrigir no Vercel:\n" +
-        "1. Vá em 'Settings' > 'Environment Variables'.\n" +
-        "2. Adicione (ou edite) a chave com o nome: 'VITE_API_KEY'.\n" +
-        "3. O valor deve ser sua chave 'AIza...'.\n" +
-        "4. IMPORTANTE: Vá na aba 'Deployments', clique nos 3 pontos do último deploy e selecione 'REDEPLOY'.\n\n" +
-        "Sem o Redeploy, a nova variável não é incorporada ao site."
+        "No Vercel:\n" +
+        "1. Defina a variável de ambiente 'VITE_API_KEY'.\n" +
+        "2. Vá em Deployments > Redeploy para aplicar."
     );
+  }
+
+  // Validação básica de formato do Google (Geralmente começam com AIza)
+  if (!apiKey.startsWith('AIza')) {
+      throw new Error(
+          `A chave de API configurada parece inválida (não começa com 'AIza').\n` +
+          `Valor atual detectado (início): '${apiKey.substring(0, 5)}...'\n` +
+          `Verifique no Vercel se você não copiou o 'Project ID' ou colou caracteres estranhos.`
+      );
   }
 
   const ai = new GoogleGenAI({ apiKey: apiKey });
@@ -140,6 +129,11 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
     return parsedJson;
   } catch (error: any) {
     console.error("Erro na API Gemini:", error);
+    
+    if (error.message && (error.message.includes("400") || error.message.includes("API_KEY_INVALID"))) {
+        throw new Error("Erro de Autenticação (400): A chave de API foi recusada pelo Google. Verifique no Vercel se a chave está correta e não possui espaços extras.");
+    }
+
     if (error.message && error.message.includes("SAFETY")) {
          throw new Error("A análise foi bloqueada por políticas de segurança. Tente uma imagem diferente.");
     }

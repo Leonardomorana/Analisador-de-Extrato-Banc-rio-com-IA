@@ -34,6 +34,9 @@ const schema = {
     required: ["clientName", "positiveEntries"]
 };
 
+// Utilitário para pausa (backoff)
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const analyzeStatement = async (base64Image: string, mimeType: string): Promise<GeminiResponse> => {
   
   // Tenta recuperar a chave de API.
@@ -54,7 +57,7 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
        rawApiKey = process.env.VITE_API_KEY || process.env.API_KEY || '';
   }
 
-  // Limpeza da chave: remove espaços em branco e aspas acidentais que podem ocorrer ao copiar/colar no Vercel
+  // Limpeza da chave: remove espaços em branco e aspas acidentais
   const apiKey = rawApiKey ? rawApiKey.trim().replace(/^["']|["']$/g, '') : '';
 
   console.log("Status da API Key:", apiKey ? "Presente" : "Ausente", apiKey ? `(Começa com: ${apiKey.substring(0, 4)}...)` : "");
@@ -68,7 +71,7 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
     );
   }
 
-  // Validação básica de formato do Google (Geralmente começam com AIza)
+  // Validação básica de formato
   if (!apiKey.startsWith('AIza')) {
       throw new Error(
           `A chave de API configurada parece inválida (não começa com 'AIza').\n` +
@@ -98,45 +101,73 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
     Se não houver transações de crédito válidas, retorne uma lista vazia para 'positiveEntries', mas ainda tente fornecer o 'clientName'. Se o nome do cliente não puder ser encontrado, retorne uma string vazia para 'clientName'.
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: base64Image,
+  // Lógica de Retry para erros 503 (Overloaded) ou falhas de rede
+  const maxRetries = 3;
+  let lastError: any;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+        const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: {
+            parts: [
+            {
+                inlineData: {
+                mimeType: mimeType,
+                data: base64Image,
+                },
             },
-          },
-          { text: prompt },
-        ],
-      },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: schema,
-      },
-    });
+            { text: prompt },
+            ],
+        },
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: schema,
+        },
+        });
 
-    const jsonText = response.text.trim();
-    const parsedJson: GeminiResponse = JSON.parse(jsonText);
-    
-    // Basic validation
-    if (!parsedJson || typeof parsedJson.clientName === 'undefined' || !Array.isArray(parsedJson.positiveEntries)) {
-        throw new Error("A resposta da IA não continha a estrutura esperada (clientName e positiveEntries).");
-    }
-    
-    return parsedJson;
-  } catch (error: any) {
-    console.error("Erro na API Gemini:", error);
-    
-    if (error.message && (error.message.includes("400") || error.message.includes("API_KEY_INVALID"))) {
-        throw new Error("Erro de Autenticação (400): A chave de API foi recusada pelo Google. Verifique no Vercel se a chave está correta e não possui espaços extras.");
-    }
+        const jsonText = response.text.trim();
+        const parsedJson: GeminiResponse = JSON.parse(jsonText);
+        
+        if (!parsedJson || typeof parsedJson.clientName === 'undefined' || !Array.isArray(parsedJson.positiveEntries)) {
+            throw new Error("A resposta da IA não continha a estrutura esperada (clientName e positiveEntries).");
+        }
+        
+        return parsedJson;
+    } catch (error: any) {
+        lastError = error;
+        const msg = error.message || '';
+        
+        // Verifica se é erro 400 (Autenticação/Bad Request) - Erro fatal, não adianta tentar de novo
+        if (msg.includes("400") || msg.includes("API_KEY_INVALID") || msg.includes("INVALID_ARGUMENT")) {
+             throw new Error(
+                "Erro 400 (API Key Inválida ou Bloqueada).\n\n" +
+                "Possíveis causas no Vercel:\n" +
+                "1. A chave contém aspas ou espaços (ex: ' AIza... ').\n" +
+                "2. *MAIS COMUM*: Sua chave tem 'Restrições de Aplicativo' (HTTP Referrer) no Google AI Studio que bloqueiam o domínio do Vercel.\n\n" +
+                "SOLUÇÃO: Vá ao console do Google (aistudio.google.com/app/apikey), edite a chave e remova as restrições de domínio temporariamente para testar."
+            );
+        }
+        
+        // Verifica erros de segurança - Fatal
+        if (msg.includes("SAFETY")) {
+             throw new Error("A análise foi bloqueada por políticas de segurança do Google. Tente uma imagem diferente (menos complexa ou sem dados sensíveis visíveis).");
+        }
 
-    if (error.message && error.message.includes("SAFETY")) {
-         throw new Error("A análise foi bloqueada por políticas de segurança. Tente uma imagem diferente.");
+        // Se for erro 503 (Overloaded) ou 429 (Too Many Requests), tenta novamente
+        const isTransient = msg.includes("503") || msg.includes("overloaded") || msg.includes("429");
+        
+        if (isTransient && attempt < maxRetries - 1) {
+            console.warn(`Tentativa ${attempt + 1} falhou (${msg}). Retentando em ${Math.pow(2, attempt)}s...`);
+            await wait(1000 * Math.pow(2, attempt)); // Backoff exponencial: 1s, 2s, 4s
+            continue;
+        }
+        
+        // Se chegou aqui, é um erro desconhecido ou esgotou tentativas
+        break;
     }
-    throw new Error(error.message || "Não foi possível analisar o extrato.");
   }
+
+  // Se saiu do loop sem retornar, lança o último erro
+  throw new Error(lastError?.message || "O serviço da IA está instável (503). Por favor, tente novamente em alguns segundos.");
 };

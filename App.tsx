@@ -79,7 +79,6 @@ const App: React.FC = () => {
       setExtractedClientName(result.clientName);
       setEditableName(result.clientName);
 
-    // FIX: Added missing opening curly brace for the catch block.
     } catch (err: any) {
       setError(err.message || "Ocorreu um erro desconhecido ao analisar o extrato.");
       setPositiveEntries([]);
@@ -165,11 +164,11 @@ const App: React.FC = () => {
         {isLoading && <Loader />}
         
         {error && (
-          <div className="mt-8 p-4 bg-red-100 border border-red-200 text-red-800 rounded-lg flex items-center gap-3">
-            <AlertTriangleIcon className="h-6 w-6 text-red-600" />
+          <div className="mt-8 p-4 bg-red-100 border border-red-200 text-red-800 rounded-lg flex items-start gap-3">
+            <AlertTriangleIcon className="h-6 w-6 text-red-600 flex-shrink-0 mt-0.5" />
             <div>
                 <h4 className="font-bold">Erro na Análise</h4>
-                <p>{error}</p>
+                <p className="whitespace-pre-wrap text-sm mt-1">{error}</p>
             </div>
           </div>
         )}

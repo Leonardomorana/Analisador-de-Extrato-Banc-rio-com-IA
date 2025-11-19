@@ -101,8 +101,9 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
     Se não houver transações de crédito válidas, retorne uma lista vazia para 'positiveEntries', mas ainda tente fornecer o 'clientName'. Se o nome do cliente não puder ser encontrado, retorne uma string vazia para 'clientName'.
   `;
 
-  // Lógica de Retry para erros 503 (Overloaded) ou falhas de rede
-  const maxRetries = 3;
+  // Lógica de Retry para erros 503 (Overloaded), UNAVAILABLE ou falhas de rede
+  // Aumentado para 5 tentativas com tempo base maior devido à instabilidade do modelo 2.5-flash
+  const maxRetries = 5;
   let lastError: any;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -136,10 +137,13 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
         return parsedJson;
     } catch (error: any) {
         lastError = error;
-        const msg = error.message || '';
         
-        // Verifica se é erro 400 (Autenticação/Bad Request) - Erro fatal, não adianta tentar de novo
-        if (msg.includes("400") || msg.includes("API_KEY_INVALID") || msg.includes("INVALID_ARGUMENT")) {
+        // Normaliza a mensagem de erro para facilitar verificação
+        const msgRaw = error.message || JSON.stringify(error);
+        const msgUpper = msgRaw.toUpperCase();
+        
+        // Verifica se é erro 400 (Autenticação/Bad Request) - Erro fatal
+        if (msgUpper.includes("400") || msgUpper.includes("API_KEY_INVALID") || msgUpper.includes("INVALID_ARGUMENT")) {
              throw new Error(
                 "Erro 400 (API Key Inválida ou Bloqueada).\n\n" +
                 "Possíveis causas no Vercel:\n" +
@@ -150,16 +154,24 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
         }
         
         // Verifica erros de segurança - Fatal
-        if (msg.includes("SAFETY")) {
+        if (msgUpper.includes("SAFETY")) {
              throw new Error("A análise foi bloqueada por políticas de segurança do Google. Tente uma imagem diferente (menos complexa ou sem dados sensíveis visíveis).");
         }
 
-        // Se for erro 503 (Overloaded) ou 429 (Too Many Requests), tenta novamente
-        const isTransient = msg.includes("503") || msg.includes("overloaded") || msg.includes("429");
+        // Verifica erros transitórios (503, 429, Overloaded, Unavailable)
+        const isTransient = 
+            msgUpper.includes("503") || 
+            msgUpper.includes("OVERLOADED") || 
+            msgUpper.includes("429") || 
+            msgUpper.includes("UNAVAILABLE") ||
+            msgUpper.includes("TEMPORARILY_OVERLOADED") ||
+            msgUpper.includes("FETCH FAILED");
         
         if (isTransient && attempt < maxRetries - 1) {
-            console.warn(`Tentativa ${attempt + 1} falhou (${msg}). Retentando em ${Math.pow(2, attempt)}s...`);
-            await wait(1000 * Math.pow(2, attempt)); // Backoff exponencial: 1s, 2s, 4s
+            // Backoff Exponencial mais agressivo: 2s, 4s, 8s, 16s, 32s
+            const delay = 2000 * Math.pow(2, attempt);
+            console.warn(`Tentativa ${attempt + 1} falhou (${msgRaw}). Servidor ocupado. Retentando em ${delay/1000}s...`);
+            await wait(delay); 
             continue;
         }
         
@@ -168,6 +180,11 @@ export const analyzeStatement = async (base64Image: string, mimeType: string): P
     }
   }
 
-  // Se saiu do loop sem retornar, lança o último erro
-  throw new Error(lastError?.message || "O serviço da IA está instável (503). Por favor, tente novamente em alguns segundos.");
+  // Se saiu do loop sem retornar, lança o último erro com mensagem amigável
+  const finalErrorMessage = lastError?.message || "";
+  if (finalErrorMessage.includes("503") || finalErrorMessage.toUpperCase().includes("OVERLOADED") || finalErrorMessage.toUpperCase().includes("UNAVAILABLE")) {
+      throw new Error("O serviço de IA do Google está extremamente sobrecarregado no momento (Erro 503). O sistema tentou 5 vezes sem sucesso. Por favor, aguarde 1 minuto e tente novamente.");
+  }
+
+  throw new Error(finalErrorMessage || "Ocorreu um erro desconhecido ao comunicar com a IA.");
 };

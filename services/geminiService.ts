@@ -35,23 +35,57 @@ const schema = {
 };
 
 export const analyzeStatement = async (base64Image: string, mimeType: string): Promise<GeminiResponse> => {
-  // Acessamos a chave de forma segura para evitar erros em tempo de execução
+  
+  // Tenta recuperar a chave de API de todas as formas possíveis suportadas pelo Vite e Vercel.
+  // IMPORTANTE: O acesso DEVE ser explícito (ponto notation) para que o Vite faça o replace no build.
   let apiKey = '';
+
   try {
-    // @ts-ignore
-    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-      apiKey = process.env.API_KEY;
-    } else if (typeof window !== 'undefined' && (window as any).process && (window as any).process.env && (window as any).process.env.API_KEY) {
-        // Fallback explícito para window.process
-        apiKey = (window as any).process.env.API_KEY;
-    }
-  } catch (e) {
-    console.warn("Aviso: Não foi possível acessar as variáveis de ambiente.", e);
+      // 1. Padrão Vite (Obrigatório uso de VITE_ no prefixo para exposição no client-side)
+      // @ts-ignore
+      if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+          // @ts-ignore
+          apiKey = import.meta.env.VITE_API_KEY;
+      }
+      // 2. Fallback para API_KEY direta (caso alguma config específica de define no vite.config exponha isso)
+      // @ts-ignore
+      else if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.API_KEY) {
+          // @ts-ignore
+          apiKey = import.meta.env.API_KEY;
+      }
+      // 3. Fallback para process.env (Node ou compatibilidade)
+      // @ts-ignore
+      else if (typeof process !== 'undefined' && process.env && process.env.VITE_API_KEY) {
+          // @ts-ignore
+          apiKey = process.env.VITE_API_KEY;
+      }
+      // @ts-ignore
+      else if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+          // @ts-ignore
+          apiKey = process.env.API_KEY;
+      }
+  } catch (err) {
+      console.error("Erro ao ler variáveis de ambiente:", err);
+  }
+
+  // Log para depuração no console do navegador (F12)
+  if (!apiKey) {
+      console.warn("GeminiService: Nenhuma API Key encontrada nas variáveis de ambiente.");
+      console.log("Verificando import.meta.env:", (import.meta as any)?.env);
+  } else {
+      console.log("GeminiService: API Key carregada com sucesso (inicia com " + apiKey.substring(0, 4) + "...)");
   }
 
   if (!apiKey) {
-    console.error("ERRO CRÍTICO: API_KEY não encontrada em process.env");
-    throw new Error("Chave de API não configurada. No Vercel, certifique-se de adicionar a variável 'API_KEY' (ou 'VITE_API_KEY') nas configurações do projeto e fazer um REDEPLOY.");
+    throw new Error(
+        "CHAVE DE API NÃO ENCONTRADA.\n\n" +
+        "Instruções para corrigir no Vercel:\n" +
+        "1. Vá em 'Settings' > 'Environment Variables'.\n" +
+        "2. Adicione (ou edite) a chave com o nome: 'VITE_API_KEY'.\n" +
+        "3. O valor deve ser sua chave 'AIza...'.\n" +
+        "4. IMPORTANTE: Vá na aba 'Deployments', clique nos 3 pontos do último deploy e selecione 'REDEPLOY'.\n\n" +
+        "Sem o Redeploy, a nova variável não é incorporada ao site."
+    );
   }
 
   const ai = new GoogleGenAI({ apiKey: apiKey });
